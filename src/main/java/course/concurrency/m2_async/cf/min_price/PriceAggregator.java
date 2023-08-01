@@ -1,12 +1,10 @@
 package course.concurrency.m2_async.cf.min_price;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -26,26 +24,27 @@ public class PriceAggregator {
 
     public double getMinPrice(long itemId) {
 
-        ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
-        executor.setKeepAliveTime(3, TimeUnit.SECONDS);
-
-        CompletableFuture<Double>[] array = new CompletableFuture[shopIds.size()];
-        int count = 0;
-        for (Long shopId : shopIds) {
-            CompletableFuture<Double> future = CompletableFuture.supplyAsync(
-                            () -> priceRetriever.getPrice(itemId, shopId),
-                            executor)
-                                .completeOnTimeout(Double.NaN, 3, TimeUnit.SECONDS)
-                                .exceptionally(ex -> Double.NaN);
-            array[count++] = future;
-        }
-
-        CompletableFuture<List<Double>> allResults = CompletableFuture.allOf(array)
-                .thenApplyAsync(v -> Arrays.stream(array)
-                        .map(CompletableFuture::join)
-                        .peek(System.out::println)
-                        .collect(Collectors.toList()));
-
+        List<CompletableFuture<Double>> futures = getCompletableFutures(itemId);
+        CompletableFuture<List<Double>> allResults = getAllResults(futures);
         return allResults.join().stream().min(Double::compareTo).orElse(Double.NaN);
     }
+
+    private static CompletableFuture<List<Double>> getAllResults(List<CompletableFuture<Double>> futures) {
+        return CompletableFuture.allOf().thenApply(
+                v -> futures.stream()
+                        .map(CompletableFuture::join)
+                        .collect(Collectors.toList())
+        );
+    }
+
+    private List<CompletableFuture<Double>> getCompletableFutures(long itemId) {
+        return shopIds.stream()
+                .map(shopId -> CompletableFuture.supplyAsync(
+                        () -> priceRetriever.getPrice(itemId, shopId), Executors.newCachedThreadPool())
+                        .completeOnTimeout(Double.NaN, 2950, TimeUnit.MILLISECONDS)
+                        .exceptionally(ex -> Double.NaN))
+                .collect(Collectors.toList());
+    }
+
+
 }
